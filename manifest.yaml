@@ -1,0 +1,277 @@
+schema_version: "1"
+
+# ===========================================================================
+# Notion RAG Integration
+# ---------------------------------------------------------------------------
+# Reads a Notion workspace and answers from it. Notion's REST `/v1/search`
+# matches TITLES ONLY (no full-text/semantic search), so this plugin builds
+# its OWN embedding index: a cron job crawls pages → markdown → chunks →
+# embeddings (via the kernel `embeddingClient` service) → a JSON vector store
+# in plugin memory. `notion_semantic_search` then cosine-ranks locally.
+# ===========================================================================
+
+identity:
+  id: "@omadia/integration-notion"
+  kind: "integration"
+  domain: "notion"
+  name: "Notion"
+  version: "0.1.0"
+  description: "Semantically searches a Notion workspace and answers questions from it. Builds its own embedding index (Notion's API only does title search), keeps it incrementally fresh via cron, and returns the most relevant page sections as context."
+  authors:
+    - name: "byte5 GmbH"
+      email: "info@omadia.ai"
+      url: "https://omadia.ai"
+  license: "MIT"
+  categories:
+    - "documents"
+    - "productivity"
+    - "knowledge"
+
+compat:
+  core: ">=1.0 <2.0"
+  node: ">=20"
+
+# Single-instance: the cron job name and the memory-backed index file are
+# fixed, so one install per agent. (Multiple instances would collide on the
+# job name and the shared notion-index.json.)
+multi_instance: false
+privacy_class: "strict"
+
+# Depend on CAPABILITIES, not specific provider plugin-ids, so the index works
+# with whichever backend the operator installed:
+#   - embeddingClient@1 — provided by @omadia/embeddings (Ollama compute).
+#   - memoryStore@1      — the /memories store; provided by EITHER
+#                          @omadia/memory (filesystem) OR @omadia/memory-postgres
+#                          (Postgres). They're mutually exclusive and both
+#                          declare memoryStore@1, so requiring the capability
+#                          (not the id) resolves to whichever is active.
+# The resolver activates both providers before this plugin; absent → activate()
+# refuses to start with a clear error.
+depends_on: []
+
+requires:
+  - "embeddingClient@^1"
+  - "memoryStore@^1"
+
+lifecycle:
+  entry: "dist/plugin.js"
+  hooks:
+    onInstall: false
+    onConfigure: true
+    onActivate: true
+    onDeactivate: true
+    onUninstall: true
+    onMigrate: true
+  uninstall_policy:
+    entities: "delete"
+    memory: "delete"
+    secrets: "delete"
+
+setup:
+  fields:
+    - key: "notion_api_token"
+      type: "secret"
+      label: "Notion API Token"
+      help: "Internal-integration token from https://www.notion.so/my-integrations (starts with 'ntn_' or 'secret_'). The agent only sees pages/databases that have been shared with the integration."
+      required: true
+
+    - key: "notion_root_ids"
+      type: "string"
+      label: "Indexed roots (optional)"
+      help: "Pick the top-level pages to index (including everything beneath them). Empty = everything shared. The list is loaded live from your Notion workspace after install. The primary restriction is still what you share with the integration in Notion."
+      required: false
+      # Dynamic post-install picker: the omadia config editor fetches choices
+      # from this plugin's `list_notion_roots` tool and stores the picks as a
+      # JSON-encoded string[]. `type` stays `string` (fully backward-compatible).
+      options_provider: "list_notion_roots"
+      multi: true
+
+    - key: "notion_exclude_ids"
+      type: "string"
+      label: "Excluded roots (optional)"
+      help: "Comma-/newline-separated page or database IDs that will NOT be indexed (including their subtrees). Takes precedence over the roots."
+      required: false
+
+    - key: "reindex_cron"
+      type: "string"
+      label: "Re-index cron"
+      help: "Croner syntax. How often the workspace is re-crawled. Default: every 6 hours."
+      required: false
+      default: "0 */6 * * *"
+
+    - key: "crawl_max_pages"
+      type: "integer"
+      label: "Max pages per crawl"
+      help: "Upper bound per index run. Protects against Notion's rate limit (3 req/s) and the plugin HTTP cap (60 req/min). Large workspaces need several runs."
+      required: false
+      default: 200
+
+    - key: "chunk_size"
+      type: "integer"
+      label: "Chunk size (characters)"
+      help: "Target length of an embedding chunk. Default: 1500."
+      required: false
+      default: 1500
+
+    - key: "request_timeout_ms"
+      type: "integer"
+      label: "Request timeout (ms)"
+      required: false
+      default: 20000
+
+  self_test: true
+
+llm:
+  prefers:
+    - capabilities: ["tool_use", "long_context"]
+      min_context: 200000
+      class: "frontier"
+      temperature_hint: 0.1
+  fallback_allowed: true
+
+capabilities:
+  - id: "notion_semantic_search"
+    description: "Finds the most topically relevant sections in the indexed Notion workspace by embedding similarity. This is the default way to find content by meaning (not just by title)."
+    input_schema:
+      type: "object"
+      required: ["query"]
+      properties:
+        query:
+          type: "string"
+          minLength: 1
+          maxLength: 1000
+          description: "Natural-language search query."
+        top_k:
+          type: "integer"
+          minimum: 1
+          maximum: 20
+          description: "Number of sections to return. Default: 6."
+    output_schema:
+      type: "array"
+      items:
+        type: "object"
+        properties:
+          pageId: { type: "string" }
+          url: { type: "string" }
+          snippet: { type: "string" }
+          score: { type: "number" }
+    side_effects: "read"
+    idempotent: true
+    timeout_ms: 20000
+
+  - id: "read_notion_page"
+    description: "Loads the full content of a Notion page as Markdown. Use this to go deeper on a semantic-search hit, or when a specific page ID is known."
+    input_schema:
+      type: "object"
+      required: ["page_id"]
+      properties:
+        page_id:
+          type: "string"
+          description: "Notion page ID (UUID, with or without dashes)."
+    output_schema:
+      type: "object"
+      properties:
+        pageId: { type: "string" }
+        markdown: { type: "string" }
+        truncated: { type: "boolean" }
+    side_effects: "read"
+    idempotent: true
+    timeout_ms: 20000
+
+  - id: "reindex_notion"
+    description: "Crawls the workspace and updates the embedding index incrementally (only changed/new pages are re-embedded). Trigger manually for the first index or after large Notion changes — otherwise the cron job handles it."
+    input_schema:
+      type: "object"
+      properties:
+        max_pages:
+          type: "integer"
+          minimum: 1
+          maximum: 1000
+          description: "Optional cap for this run. Without a value, crawl_max_pages from setup applies."
+    output_schema:
+      type: "object"
+      properties:
+        pagesIndexed: { type: "integer" }
+        pagesSkipped: { type: "integer" }
+        pagesRemoved: { type: "integer" }
+        chunks: { type: "integer" }
+        durationMs: { type: "integer" }
+    side_effects: "write"
+    idempotent: false
+    timeout_ms: 120000
+
+  - id: "list_notion_roots"
+    description: "Lists the top-level Notion pages that can be selected as index roots. Used primarily by the setup picker; returns [{value,label,group}]."
+    input_schema:
+      type: "object"
+      properties: {}
+    output_schema:
+      type: "array"
+      items:
+        type: "object"
+        properties:
+          value: { type: "string" }
+          label: { type: "string" }
+          group: { type: "string" }
+    side_effects: "read"
+    idempotent: true
+    timeout_ms: 20000
+
+playbook:
+  when_to_use: |
+    For questions answered from internal Notion knowledge:
+    "What does our onboarding doc say about X?", "Find the spec for feature Y",
+    "What have we documented about topic Z?". Start with
+    `notion_semantic_search`; go deeper with `read_notion_page` when needed.
+    Use `reindex_notion` only when the index is empty or stale.
+  combines_with: []
+  not_for:
+    - "Writing/editing Notion pages (read-only)"
+    - "Searching pages that were not shared with the integration"
+    - "Real-time content — the index is only as fresh as the last crawl"
+
+  example_prompts:
+    - "What does our Notion say about the vacation policy?"
+    - "Find the architecture notes for the billing service."
+    - "Re-index my Notion workspace."
+
+entities:
+  produces: []
+  consumes: []
+
+skills:
+  - id: "notion_expert_system"
+    kind: "prompt_partial"
+    path: "skills/notion-expert.md"
+    description: "Role, tone, and working style for the Notion integration."
+    shareable: false
+
+permissions:
+  memory:
+    reads:
+      - "integration:@omadia/integration-notion:*"
+    writes:
+      - "integration:@omadia/integration-notion:*"
+  graph:
+    reads: []
+    writes: []
+  network:
+    outbound:
+      - "api.notion.com"
+  filesystem:
+    scratch: false
+
+integrations: []
+
+# The re-index cron is registered programmatically in activate() (with the
+# operator-configured `reindex_cron`), so no static declaration here.
+jobs: []
+
+ui:
+  settings_schema: null
+  commands:
+    - id: "reindex_now"
+      label: "Refresh Notion index"
+      capability: "reindex_notion"
+      trigger: null
+  dashboard_cards: []

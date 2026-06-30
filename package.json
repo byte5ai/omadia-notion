@@ -1,0 +1,32 @@
+{
+  "name": "@omadia/integration-notion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/plugin.js",
+  "description": "Notion integration for omadia — semantic search over a Notion workspace via a self-built embedding index.",
+  "license": "MIT",
+  "homepage": "https://github.com/byte5ai/omadia-notion",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/byte5ai/omadia-notion.git"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build-zip.mjs",
+    "clean": "rm -rf dist out"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "zod": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
