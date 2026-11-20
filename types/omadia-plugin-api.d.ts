@@ -122,7 +122,7 @@ declare module '@omadia/plugin-api' {
     readonly jobs: JobsAccessor;
     /** Always present; no permission gate. */
     readonly status: StatusAccessor;
-    /** Tool runtime (kernel >=1.76.0). */
+    /** Tool runtime (kernel >=1.77.0). */
     readonly tools: ToolsAccessor;
     log(...args: unknown[]): void;
   }

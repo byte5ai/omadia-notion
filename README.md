@@ -33,7 +33,7 @@ agents an operator granted this integration to; each tool declares
 `capabilities[].side_effects` in the manifest. The former Notion-expert persona
 ships as two inactive agent templates (en/de, `agent_templates:` in
 `manifest.yaml`) that an operator turns into an agent in the Agent Builder.
-Requires omadia core `>=1.76.0`. `embeddingClient@^1` stays allowed; all
+Requires omadia core `>=1.77.0`. `embeddingClient@^1` stays allowed; all
 network traffic uses `ctx.http.fetch` (`api.notion.com`).
 
 ## Setup (operator)

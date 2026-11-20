@@ -28,7 +28,7 @@ identity:
     - "knowledge"
 
 compat:
-  core: ">=1.76.0 <2.0"
+  core: ">=1.77.0 <2.0"
   node: ">=20"
 
 # Single-instance: the cron job name and the memory-backed index file are
