@@ -7,7 +7,7 @@
  * plugin offline. At runtime the host injects the genuine implementations.
  *
  * Only the slice of `PluginContext` this plugin actually uses is declared
- * (secrets, config, services, http, memory, jobs, status, log). Kept in sync
+ * (secrets, config, services, http, memory, jobs, status, tools, log). Kept in sync
  * with the boilerplate `agent-integration/types.ts` of the targeted core.
  */
 declare module '@omadia/plugin-api' {
@@ -88,6 +88,27 @@ declare module '@omadia/plugin-api' {
     clear(): void;
   }
 
+  /** Tool spec in the shape the Anthropic Messages API accepts. */
+  export interface NativeToolSpec {
+    readonly name: string;
+    readonly description: string;
+    readonly input_schema: {
+      readonly type: 'object';
+      readonly properties: Record<string, unknown>;
+      readonly required?: readonly string[];
+    };
+    readonly domain?: string;
+  }
+
+  /** Handler a plugin hands the kernel with the spec; returns the tool-use reply. */
+  export type NativeToolHandler = (input: unknown) => Promise<string>;
+
+  /** Tool runtime: contributes a tool to the agents this plugin is granted to.
+   *  Returns a dispose handle that `close()` MUST call. */
+  export interface ToolsAccessor {
+    register(spec: NativeToolSpec, handler: NativeToolHandler): () => void;
+  }
+
   export interface PluginContext {
     readonly agentId: string;
     readonly secrets: SecretsAccessor;
@@ -101,6 +122,8 @@ declare module '@omadia/plugin-api' {
     readonly jobs: JobsAccessor;
     /** Always present; no permission gate. */
     readonly status: StatusAccessor;
+    /** Tool runtime (kernel >=1.75.0). */
+    readonly tools: ToolsAccessor;
     log(...args: unknown[]): void;
   }
 }

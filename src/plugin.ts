@@ -4,7 +4,8 @@ import { createClient } from './client.js';
 import { crawlAndIndex, type EmbeddingClient, type IndexResult } from './indexer.js';
 import { createPgVectorStore } from './pgVectorStore.js';
 import { createScopeFilter, parseIdList } from './scope.js';
-import { createToolkit, type Toolkit } from './toolkit.js';
+import { registerToolkit } from './registerTools.js';
+import { createToolkit } from './toolkit.js';
 import type { PluginContext } from '@omadia/plugin-api';
 import { createVectorStore, type VectorStore } from './vectorStore.js';
 
@@ -20,12 +21,11 @@ const REINDEX_JOB_TIMEOUT_MS = 120_000;
 // a stable label; bumping it forces a clean re-index after a model swap.
 const EMBEDDING_INDEX_MODEL = 'kernel-embeddingClient-v1';
 
-export interface AgentHandle {
-  readonly toolkit: Toolkit;
+export interface PluginHandle {
   close(): Promise<void>;
 }
 
-export async function activate(ctx: PluginContext): Promise<AgentHandle> {
+export async function activate(ctx: PluginContext): Promise<PluginHandle> {
   ctx.log('activating');
 
   if (!ctx.http) {
@@ -137,6 +137,9 @@ export async function activate(ctx: PluginContext): Promise<AgentHandle> {
     log: ctx.log,
   });
 
+  // Every toolkit tool goes to the kernel's tool runtime (no sub-agent).
+  const disposeTools = registerToolkit(ctx, toolkit);
+
   const disposeJob = ctx.jobs.register(
     { name: 'notion-reindex', schedule: { cron }, timeoutMs: REINDEX_JOB_TIMEOUT_MS, overlap: 'skip' },
     (signal) => runIndex(undefined, signal).then(() => undefined),
@@ -146,9 +149,9 @@ export async function activate(ctx: PluginContext): Promise<AgentHandle> {
   ctx.log('ready');
 
   return {
-    toolkit,
     async close() {
       ctx.log('deactivating');
+      disposeTools();
       disposeJob();
       await toolkit.close();
     },

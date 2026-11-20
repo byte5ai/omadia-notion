@@ -5,8 +5,8 @@ import type { SearchHit, VectorStore } from './vectorStore.js';
 
 /**
  * Toolkit = capability → executable handler with a Zod input schema.
- * Each entry mirrors 1:1 a capability in manifest.yaml. The runtime bridges
- * these ToolDescriptors into DomainTools; this package builds no LLM client
+ * Each entry mirrors 1:1 a capability in manifest.yaml. `registerTools.ts`
+ * registers them via `ctx.tools.register`; this package builds no LLM client
  * and runs no tool loop of its own.
  */
 
@@ -48,8 +48,11 @@ const reindexInput = z.object({
 export function createToolkit(opts: ToolkitOptions): Toolkit {
   const semanticSearch: ToolDescriptor<z.infer<typeof semanticSearchInput>, SearchHit[]> = {
     id: 'notion_semantic_search',
-    description:
-      'Finds the most relevant sections in the indexed Notion workspace by embedding similarity.',
+    description: [
+      'Finds the most relevant sections in the indexed Notion workspace by embedding similarity. Start here for almost every Notion question: Notion\'s own API only searches titles, this search runs over a local embedding index and finds content by meaning.',
+      'Returns page id, url, snippet and score per hit. The index stores only content and page id (no title); call read_notion_page with the id when you need the title or the full page.',
+      'Cite the page url so the user can open the source. If nothing useful comes back, say so plainly and consider whether the index is empty or stale (then reindex_notion). You only see pages that were shared with the integration in Notion; a missing page is often a missing share.',
+    ].join(' '),
     input: semanticSearchInput,
     async run({ query, top_k }) {
       opts.log('tool:notion_semantic_search', { query, top_k });
@@ -63,7 +66,8 @@ export function createToolkit(opts: ToolkitOptions): Toolkit {
     { pageId: string; markdown: string; truncated: boolean }
   > = {
     id: 'read_notion_page',
-    description: 'Loads the full content of a Notion page as Markdown.',
+    description:
+      'Loads the full content of a Notion page as Markdown (live from Notion). Use it to go deeper on a notion_semantic_search hit or when a page id is known; also the way to get a page title. Read-only: Notion pages cannot be created or edited with this plugin.',
     input: readPageInput,
     async run({ page_id }) {
       opts.log('tool:read_notion_page', { page_id });
@@ -75,7 +79,7 @@ export function createToolkit(opts: ToolkitOptions): Toolkit {
   const reindex: ToolDescriptor<z.infer<typeof reindexInput>, IndexResult> = {
     id: 'reindex_notion',
     description:
-      'Crawls the workspace and updates the embedding index incrementally.',
+      'Crawls the workspace and updates the local embedding index incrementally (only changed or new pages are re-embedded). Expensive: use it only when the index is empty or stale (e.g. a freshly written page is missing), never unprompted on every question. The cron job normally keeps the index fresh. Changes only the plugin\'s own index, never Notion.',
     input: reindexInput,
     async run({ max_pages }) {
       opts.log('tool:reindex_notion', { max_pages });
@@ -93,7 +97,7 @@ export function createToolkit(opts: ToolkitOptions): Toolkit {
   > = {
     id: 'list_notion_roots',
     description:
-      'Lists the top-level Notion pages that can be selected as index roots.',
+      'Lists the top-level Notion pages that can be selected as index roots. Used by the setup picker; returns [{value,label,group}].',
     input: listRootsInput,
     async run() {
       opts.log('tool:list_notion_roots');
