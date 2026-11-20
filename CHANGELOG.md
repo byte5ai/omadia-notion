@@ -2,7 +2,7 @@
 
 ## 0.2.0 (unreleased) — spec 2042 plugin boundary
 
-Requires omadia core `>=1.77.0 <2.0`.
+Requires omadia core `>=1.78.0 <2.0`.
 
 - Kind stays `integration`. The `prompt_partial` persona skill
   (`skills/notion-expert.md`) is gone; its tool knowledge moved into the tool
