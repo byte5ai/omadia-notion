@@ -70,7 +70,7 @@ const stageDir = join(pkgRoot, 'out', stageName);
 rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 
-const INCLUDE = ['manifest.yaml', 'package.json', 'dist', 'assets', 'skills', 'README.md'];
+const INCLUDE = ['manifest.yaml', 'package.json', 'dist', 'assets', 'README.md'];
 const RENAME = { LICENSE: 'LICENSE.txt', NOTICE: 'NOTICE.txt' };
 for (const entry of INCLUDE) {
   const src = join(pkgRoot, entry);

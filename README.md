@@ -25,6 +25,17 @@ notion_semantic_search ──> embed query ──> cosine-rank chunks locally
 | `read_notion_page` | Fetches a page as Markdown (live), following Notion's `truncated`/`unknown_block_ids` for large pages. |
 | `reindex_notion` | Incremental crawl: re-embeds only pages whose `last_edited_time` changed; drops pages removed from the workspace. |
 
+## Plugin boundary (spec 2042)
+
+A plugin has no persona and no model loop. The tools are registered with
+`ctx.tools.register` (`src/registerTools.ts`) and offered by the kernel to the
+agents an operator granted this integration to; each tool declares
+`capabilities[].side_effects` in the manifest. The former Notion-expert persona
+ships as two inactive agent templates (en/de, `agent_templates:` in
+`manifest.yaml`) that an operator turns into an agent in the Agent Builder.
+Requires omadia core `>=1.78.0`. `embeddingClient@^1` stays allowed; all
+network traffic uses `ctx.http.fetch` (`api.notion.com`).
+
 ## Setup (operator)
 
 1. Create an internal integration at <https://www.notion.so/my-integrations>
@@ -44,7 +55,7 @@ without `embeddingClient` the plugin refuses to start.
 nvm use            # Node 22
 npm install
 npm run typecheck  # tsc gate (no emit)
-npm run build      # esbuild bundle → out/omadia-integration-notion-0.1.0.zip
+npm run build      # esbuild bundle → out/omadia-integration-notion-0.2.0.zip
 ```
 
 `src/plugin.ts` is the entry; esbuild bundles all local modules into

@@ -15,7 +15,7 @@ identity:
   kind: "integration"
   domain: "notion"
   name: "Notion"
-  version: "0.1.0"
+  version: "0.2.0"
   description: "Semantically searches a Notion workspace and answers questions from it. Builds its own embedding index (Notion's API only does title search), keeps it incrementally fresh via cron, and returns the most relevant page sections as context."
   authors:
     - name: "byte5 GmbH"
@@ -28,7 +28,7 @@ identity:
     - "knowledge"
 
 compat:
-  core: ">=1.0 <2.0"
+  core: ">=1.78.0 <2.0"
   node: ">=20"
 
 # Single-instance: the cron job name and the memory-backed index file are
@@ -121,17 +121,9 @@ setup:
 
   self_test: true
 
-llm:
-  prefers:
-    - capabilities: ["tool_use", "long_context"]
-      min_context: 200000
-      class: "frontier"
-      temperature_hint: 0.1
-  fallback_allowed: true
-
 capabilities:
   - id: "notion_semantic_search"
-    description: "Finds the most topically relevant sections in the indexed Notion workspace by embedding similarity. This is the default way to find content by meaning (not just by title)."
+    description: "Finds the most topically relevant sections in the indexed Notion workspace by embedding similarity. This is the default way to find content by meaning (not just by title). Cite the page URL of the hits."
     input_schema:
       type: "object"
       required: ["query"]
@@ -223,7 +215,10 @@ playbook:
     "What does our onboarding doc say about X?", "Find the spec for feature Y",
     "What have we documented about topic Z?". Start with
     `notion_semantic_search`; go deeper with `read_notion_page` when needed.
-    Use `reindex_notion` only when the index is empty or stale.
+    Use `reindex_notion` only when the index is empty or stale (a crawl is
+    expensive; never trigger it unprompted on every question).
+    Cite the page URL from the hits. The index stores only content and page
+    id (no title): call `read_notion_page` for a title or the full content.
   combines_with: []
   not_for:
     - "Writing/editing Notion pages (read-only)"
@@ -238,13 +233,6 @@ playbook:
 entities:
   produces: []
   consumes: []
-
-skills:
-  - id: "notion_expert_system"
-    kind: "prompt_partial"
-    path: "skills/notion-expert.md"
-    description: "Role, tone, and working style for the Notion integration."
-    shareable: false
 
 permissions:
   memory:
@@ -266,6 +254,68 @@ integrations: []
 # The re-index cron is registered programmatically in activate() (with the
 # operator-configured `reindex_cron`), so no static declaration here.
 jobs: []
+
+# Inactive presets (spec 2042 section 5.10): the former persona of this
+# package. An operator turns a template into an agent in the Agent Builder and
+# grants the suggested capability there; installing this plugin creates no
+# agent and grants nothing. One template per language.
+agent_templates:
+  - id: "notion-knowledge"
+    name: "Notion Knowledge Assistant"
+    short_description: "Answers questions from your Notion workspace."
+    long_description: >-
+      A knowledge colleague that answers from the Notion pages shared with the
+      integration: it searches by meaning, reads pages in full and cites the
+      source page. Read-only.
+    language: "en"
+    instructions: |
+      You answer questions from a Notion workspace. Your only source of
+      knowledge is the output of your Notion tools; you do not guess and you
+      do not invent content or sources.
+
+      - Almost always start with `notion_semantic_search`; Notion's own API
+        only searches titles, this search finds content by meaning.
+      - If the sections are not enough, go deeper with `read_notion_page`.
+      - If search returns nothing useful, say so plainly and consider that the
+        index may be empty or stale; then suggest `reindex_notion` instead of
+        triggering it on every question.
+      - Cite the page URL of the hits so the user can open the source.
+      - Read-only: you cannot create or edit Notion pages. You only see what
+        was shared with the integration; a missing page is often a missing
+        share, so point that out.
+      - The index is only as fresh as the last crawl. No assessment without
+        data from one of your tools.
+    capabilities:
+      - "@omadia/integration-notion"
+
+  - id: "notion-wissen"
+    name: "Notion-Wissensassistent"
+    short_description: "Beantwortet Fragen aus eurem Notion-Workspace."
+    long_description: >-
+      Eine Wissens-Kollegin, die aus den Notion-Seiten antwortet, die mit der
+      Integration geteilt wurden: Sie sucht nach Bedeutung, liest Seiten
+      vollständig und nennt die Quellseite. Nur lesend.
+    language: "de"
+    instructions: |
+      Du beantwortest Fragen aus einem Notion-Workspace. Deine einzige
+      Wissensquelle ist die Ausgabe deiner Notion-Tools; du rätst nicht und
+      erfindest weder Inhalte noch Quellen.
+
+      - Starte fast immer mit `notion_semantic_search`; die Notion-API selbst
+        durchsucht nur Titel, diese Suche findet Inhalte nach Bedeutung.
+      - Reichen die Abschnitte nicht, geh mit `read_notion_page` tiefer.
+      - Liefert die Suche nichts Brauchbares, sag das offen und bedenke, dass
+        der Index leer oder veraltet sein kann; schlag dann `reindex_notion`
+        vor, statt es bei jeder Frage auszulösen.
+      - Nenne die Seiten-URL der Treffer, damit der Nutzer die Quelle öffnen
+        kann.
+      - Nur lesen: Du kannst keine Notion-Seiten anlegen oder ändern. Du
+        siehst nur, was mit der Integration geteilt wurde; fehlt eine Seite,
+        fehlt oft die Freigabe, weise darauf hin.
+      - Der Index ist nur so frisch wie der letzte Crawl. Keine Einschätzung
+        ohne Daten aus einem deiner Tools.
+    capabilities:
+      - "@omadia/integration-notion"
 
 ui:
   settings_schema: null
